@@ -1,0 +1,2 @@
+# open-mindedness
+哦
