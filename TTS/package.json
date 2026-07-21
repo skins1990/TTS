@@ -1,0 +1,15 @@
+{
+  "name": "qwen-voice-studio",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A lightweight personal Qwen TTS web studio",
+  "scripts": {
+    "dev": "node --no-warnings --watch server.js",
+    "start": "node --no-warnings server.js",
+    "check": "node --check server.js && node --check public/app.js && node --check public/seed-audio-ui.js && node --check public/seed-audio-page.js && node --check lib/minimax.js && node --check lib/seed-audio.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22.5"
+  }
+}

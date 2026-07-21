@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="使用 Qwen、StepAudio 与 MiniMax 生成和精细控制语音">
+  <title>声笺 · AI 语音工作台</title>
+  <link rel="stylesheet" href="/styles.css?v=20260720-3">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="声笺首页">
+      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+      <span>声笺</span>
+      <span class="brand-model">AI TTS Studio</span>
+    </a>
+    <nav class="main-nav" aria-label="主要功能">
+      <button class="nav-tab active" type="button" data-view="generate">语音生成</button>
+      <button class="nav-tab" type="button" data-view="instruct">语气控制</button>
+      <button class="nav-tab" type="button" data-view="step">阶跃语音</button>
+      <button class="nav-tab" type="button" data-view="minimax">MiniMax</button>
+      <button class="nav-tab" type="button" data-view="seed-audio">Seed Audio</button>
+      <button class="nav-tab" type="button" data-view="voices">音色库 <span id="voiceCount">0</span></button>
+    </nav>
+    <div class="connection" id="connectionStatus" role="status">
+      <span class="status-dot"></span><span>正在检查服务</span>
+    </div>
+  </header>
+
+  <main>
+    <section id="generateView" class="app-view">
+      <div class="page-heading">
+        <div><p class="eyebrow">语音生成</p><h1>把文字变成声音</h1></div>
+        <button class="text-button" id="fillExample" type="button">填入示例</button>
+      </div>
+
+      <form id="generateForm" class="workspace">
+        <div class="editor-pane">
+          <label class="field-label" for="scriptText">文案</label>
+          <textarea id="scriptText" maxlength="10000" placeholder="在这里输入要朗读的文字……" required></textarea>
+          <div class="editor-footer"><span>生成结果自动保存到 SQLite 历史</span><span id="charCount">0 / 10,000</span></div>
+        </div>
+
+        <aside class="settings-pane" aria-label="生成设置">
+            <div class="settings-title"><h2>选择音色</h2><span id="modelBadge">Qwen3 VD</span></div>
+
+          <div class="source-panel">
+            <label class="field-label" for="savedVoice">已保存音色</label>
+            <select id="savedVoice"></select>
+            <div class="no-voice" id="noVoice" hidden>
+              <p>音色库还是空的</p>
+              <button type="button" data-open-voices>去创建第一个音色</button>
+            </div>
+            <div class="selected-voice" id="selectedVoice" hidden>
+              <span class="voice-symbol">声</span>
+              <div><strong id="selectedVoiceName"></strong><small id="selectedVoicePrompt"></small></div>
+              <button type="button" id="previewSelectedVoice">试听</button>
+            </div>
+            <p class="compact-tip">这里可生成已保存的 VD、VC 或普通官方系统音色；需要语气指令时请进入“语气控制”。</p>
+          </div>
+
+          <button class="primary-button" id="generateButton" type="submit">
+            <span class="button-wave" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span id="generateLabel">生成语音</span>
+          </button>
+          <p class="form-message" id="generateMessage" role="alert" aria-live="polite"></p>
+        </aside>
+      </form>
+
+      <section class="result-panel" id="resultPanel" hidden>
+        <div class="result-info"><span class="result-icon" aria-hidden="true">♪</span><div><h2>语音已生成</h2><p id="resultMeta"></p></div></div>
+        <audio id="audioPlayer" controls preload="metadata"></audio>
+        <a class="outline-button" id="downloadButton" href="#" target="_blank" rel="noopener">下载音频</a>
+      </section>
+
+      <section class="history-section" aria-labelledby="historyTitle">
+        <div class="section-heading"><div><p class="eyebrow">SQLite 持久保存 · VD / VC / 官方</p><h2 id="historyTitle">普通生成历史</h2></div><button class="text-button danger" id="clearHistory" type="button" hidden>清空记录</button></div>
+        <div id="historyList" class="history-list"></div>
+        <div class="empty-state" id="historyEmpty"><span>♪</span><p>生成的语音会出现在这里</p></div>
+      </section>
+    </section>
+
+    <section id="instructView" class="app-view" hidden>
+      <div class="page-heading">
+        <div><p class="eyebrow">Qwen3-TTS-Instruct-Flash</p><h1>控制语气与表达</h1></div>
+        <span class="database-badge">24 个官方音色</span>
+      </div>
+
+      <form id="instructForm" class="workspace instruct-workspace">
+        <div class="editor-pane">
+          <label class="field-label" for="instructText">文案</label>
+          <textarea id="instructText" maxlength="10000" placeholder="在这里输入要朗读的文字……" required></textarea>
+          <div class="editor-footer"><span>使用官方音色，语气由指令控制</span><span id="instructCharCount">0 / 10,000</span></div>
+        </div>
+
+        <aside class="settings-pane" aria-label="语气控制设置">
+          <div class="settings-title"><h2>官方音色</h2><span>Qwen3 Instruct</span></div>
+          <div class="source-panel instruct-source-panel">
+            <label class="field-label" for="instructVoice">选择音色</label>
+            <select id="instructVoice" required></select>
+            <p class="instruct-voice-description" id="instructVoiceDescription"></p>
+          </div>
+
+          <fieldset class="instruction-fieldset">
+            <legend>语气预设</legend>
+            <div class="style-chips" id="instructionPresets"></div>
+          </fieldset>
+          <label class="field-label" for="instructInstructions">具体指令</label>
+          <textarea id="instructInstructions" maxlength="4000" placeholder="例如：语速稍慢，语气温柔，句间停顿自然。" required></textarea>
+          <label class="checkbox-label"><input id="optimizeInstructions" type="checkbox" checked>优化语气指令</label>
+
+          <button class="primary-button" id="instructButton" type="submit">
+            <span class="button-wave" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span id="instructLabel">控制语气并生成</span>
+          </button>
+          <p class="form-message" id="instructMessage" role="alert" aria-live="polite"></p>
+        </aside>
+      </form>
+
+      <section class="result-panel" id="instructResultPanel" hidden>
+        <div class="result-info"><span class="result-icon" aria-hidden="true">♪</span><div><h2>语音已生成</h2><p id="instructResultMeta"></p></div></div>
+        <audio id="instructAudioPlayer" controls preload="metadata"></audio>
+        <a class="outline-button" id="instructDownloadButton" href="#" target="_blank" rel="noopener">下载音频</a>
+      </section>
+
+      <section class="history-section" aria-labelledby="instructHistoryTitle">
+        <div class="section-heading"><div><p class="eyebrow">SQLite 持久保存 · Instruct</p><h2 id="instructHistoryTitle">语气控制历史</h2></div><button class="text-button danger" id="clearInstructHistory" type="button" hidden>清空记录</button></div>
+        <div id="instructHistoryList" class="history-list"></div>
+        <div class="empty-state" id="instructHistoryEmpty"><span>◌</span><p>语气控制生成的语音会出现在这里</p></div>
+      </section>
+    </section>
+
+    <section id="stepView" class="app-view" hidden>
+      <div class="page-heading">
+        <div><p class="eyebrow">StepAudio 2.5 TTS</p><h1>精细控制声音表现</h1></div>
+        <span class="database-badge">36 个官方音色</span>
+      </div>
+
+      <form id="stepForm" class="workspace step-workspace">
+        <div class="editor-pane step-editor-pane">
+          <label class="field-label" for="stepText">文案</label>
+          <textarea id="stepText" maxlength="1000" placeholder="在这里输入要朗读的文字……" required></textarea>
+          <div class="editor-footer"><span>圆括号内可写局部动作或语气，例如（轻笑）</span><span id="stepCharCount">0 / 1,000</span></div>
+        </div>
+
+        <aside class="settings-pane step-settings" aria-label="阶跃语音精细设置">
+          <div class="settings-title"><h2>声音与演绎</h2><span>stepaudio-2.5-tts</span></div>
+
+          <div class="step-control-section">
+            <label class="field-label" for="stepVoice">官方音色</label>
+            <select id="stepVoice" required></select>
+            <div class="step-voice-detail" id="stepVoiceDetail"></div>
+          </div>
+
+          <div class="step-control-grid step-control-grid-three">
+            <label class="control-field" for="stepEmotion"><span>整体情绪</span><small>控制全篇情绪基调</small><select id="stepEmotion"></select></label>
+            <label class="control-field" for="stepStyle"><span>演绎风格</span><small>控制角色和节奏倾向</small><select id="stepStyle"></select></label>
+            <label class="control-field" for="stepLanguage"><span>语言倾向</span><small>优化对应语言的发音</small><select id="stepLanguage"></select></label>
+          </div>
+
+          <label class="control-field step-instruction-field" for="stepInstruction">
+            <span>补充演绎指令</span><small>补充角色、场景、停顿或重音要求；与上方选项合计最多 200 字</small>
+            <textarea id="stepInstruction" maxlength="200" placeholder="例如：像纪录片旁白，开头克制，结尾逐渐坚定。"></textarea>
+          </label>
+
+          <div class="step-control-grid">
+            <label class="control-field range-field" for="stepSpeed"><span>精确语速 <output id="stepSpeedValue">1.0×</output></span><small>0.5 倍到 2.0 倍</small><input id="stepSpeed" type="range" min="0.5" max="2" step="0.05" value="1"></label>
+            <label class="control-field range-field" for="stepVolume"><span>输出音量 <output id="stepVolumeValue">100%</output></span><small>原始音量的 10% 到 200%</small><input id="stepVolume" type="range" min="0.1" max="2" step="0.1" value="1"></label>
+          </div>
+
+          <details class="advanced-settings">
+            <summary>输出与文本处理</summary>
+            <div class="advanced-settings-body">
+              <div class="step-control-grid step-control-grid-three">
+                <label class="control-field" for="stepFormat"><span>音频格式</span><small>选择保存格式</small><select id="stepFormat"><option value="mp3">MP3</option><option value="wav">WAV</option><option value="flac">FLAC</option><option value="opus">OPUS</option><option value="pcm">PCM · 下载使用</option></select></label>
+                <label class="control-field" for="stepSampleRate"><span>采样率</span><small>越高越清晰、文件越大</small><select id="stepSampleRate"><option value="8000">8,000 Hz</option><option value="16000">16,000 Hz</option><option value="22050">22,050 Hz</option><option value="24000" selected>24,000 Hz</option><option value="48000">48,000 Hz</option></select></label>
+                <label class="control-field" for="stepNormalization"><span>文本归一化</span><small>数字、单位和符号读法</small><select id="stepNormalization"><option value="standard">标准 · 延迟更低</option><option value="enhanced">增强 · 播报更自然</option></select></label>
+              </div>
+
+              <label class="control-field" for="stepPronunciation"><span>发音映射</span><small>每行一条“原文/发音”，例如：扁舟/偏舟；拼音声调用 1–5 表示</small><textarea id="stepPronunciation" maxlength="6000" placeholder="阿胶/e1胶&#10;扁舟/偏舟"></textarea></label>
+              <label class="checkbox-label step-checkbox"><input id="stepMarkdownFilter" type="checkbox" checked><span><b>过滤 Markdown 标记</b><small>朗读 Markdown 文案时忽略标题、列表等格式符号</small></span></label>
+            </div>
+          </details>
+
+          <button class="primary-button" id="stepButton" type="submit">
+            <span class="button-wave" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span id="stepLabel">生成阶跃语音</span>
+          </button>
+          <p class="form-message" id="stepMessage" role="alert" aria-live="polite"></p>
+        </aside>
+      </form>
+
+      <section class="result-panel" id="stepResultPanel" hidden>
+        <div class="result-info"><span class="result-icon" aria-hidden="true">♪</span><div><h2>语音已生成</h2><p id="stepResultMeta"></p></div></div>
+        <audio id="stepAudioPlayer" controls preload="metadata"></audio>
+        <a class="outline-button" id="stepDownloadButton" href="#">下载音频</a>
+      </section>
+
+      <section class="history-section" aria-labelledby="stepHistoryTitle">
+        <div class="section-heading"><div><p class="eyebrow">SQLite 本地音频 · StepAudio 2.5</p><h2 id="stepHistoryTitle">阶跃语音历史</h2></div><button class="text-button danger" id="clearStepHistory" type="button" hidden>清空记录</button></div>
+        <div id="stepHistoryList" class="history-list"></div>
+        <div class="empty-state" id="stepHistoryEmpty"><span>♪</span><p>阶跃生成的语音会单独保存在这里</p></div>
+      </section>
+    </section>
+
+    <section id="minimaxView" class="app-view" hidden>
+      <div class="page-heading">
+        <div><p class="eyebrow">MiniMax Async TTS</p><h1>生成长文本语音</h1></div>
+        <span class="database-badge"><span id="minimaxVoiceCount">0</span> 个官方音色</span>
+      </div>
+
+      <form id="minimaxForm" class="workspace step-workspace minimax-workspace">
+        <div class="editor-pane step-editor-pane minimax-editor-pane">
+          <fieldset class="minimax-source-fieldset">
+            <legend>输入方式</legend>
+            <div class="creation-switch minimax-source-switch">
+              <label><input type="radio" name="minimaxSource" value="text" checked><span>直接输入</span></label>
+              <label><input type="radio" name="minimaxSource" value="file"><span>TXT / ZIP 文件</span></label>
+            </div>
+          </fieldset>
+
+          <div id="minimaxTextPanel" class="minimax-input-panel">
+            <label class="field-label" for="minimaxText">文案</label>
+            <textarea id="minimaxText" maxlength="50000" placeholder="输入长文本；可使用 (laughs)、(sighs)、(breath) 等语气词标签……"></textarea>
+            <div class="editor-footer"><span>任务完成后自动下载并保存到 SQLite</span><span id="minimaxCharCount">0 / 50,000</span></div>
+          </div>
+
+          <div id="minimaxFilePanel" class="minimax-input-panel minimax-file-panel" hidden>
+            <label class="field-label" for="minimaxFile">文本文件</label>
+            <label class="upload-zone minimax-upload-zone" id="minimaxUploadZone" for="minimaxFile">
+              <input id="minimaxFile" type="file" accept="text/plain,application/zip,.txt,.zip">
+              <span class="upload-icon" aria-hidden="true">＋</span>
+              <strong>上传 TXT 或 ZIP</strong>
+              <small>长文本使用 TXT；批量标题、正文或附加内容可使用 ZIP</small>
+            </label>
+            <div class="file-preview" id="minimaxFilePreview" hidden>
+              <div><strong id="minimaxFileName"></strong><small id="minimaxFileMeta"></small></div>
+              <button type="button" id="removeMinimaxFile">移除</button>
+            </div>
+          </div>
+        </div>
+
+        <aside class="settings-pane step-settings minimax-settings" aria-label="MiniMax 异步语音设置">
+          <div class="settings-title"><h2>音色与输出</h2><span>speech-2.8-hd</span></div>
+
+          <div class="step-control-section">
+            <label class="field-label" for="minimaxVoice">官方音色</label>
+            <input id="minimaxVoiceSearch" type="text" autocomplete="off" placeholder="搜索名称、描述或 Voice ID">
+            <select id="minimaxVoice" required><option value="">正在加载官方音色…</option></select>
+            <div class="step-voice-detail" id="minimaxVoiceDetail"></div>
+          </div>
+
+          <div class="step-control-grid step-control-grid-three">
+            <label class="control-field range-field" for="minimaxSpeed"><span>语速 <output id="minimaxSpeedValue">1.00×</output></span><small>0.5 倍到 2.0 倍</small><input id="minimaxSpeed" type="range" min="0.5" max="2" step="0.05" value="1"></label>
+            <label class="control-field range-field" for="minimaxVolume"><span>音量 <output id="minimaxVolumeValue">1.0</output></span><small>0.1 到 10.0</small><input id="minimaxVolume" type="range" min="0.1" max="10" step="0.1" value="1"></label>
+            <label class="control-field range-field" for="minimaxPitch"><span>语调 <output id="minimaxPitchValue">0</output></span><small>-12 到 12 半音</small><input id="minimaxPitch" type="range" min="-12" max="12" step="1" value="0"></label>
+          </div>
+
+          <label class="control-field" for="minimaxEmotion"><span>整体情绪</span><small>自动时由模型根据文案判断</small><select id="minimaxEmotion"><option value="">自动 · 跟随文案</option><option value="happy">高兴</option><option value="sad">悲伤</option><option value="angry">愤怒</option><option value="fearful">害怕</option><option value="disgusted">厌恶</option><option value="surprised">惊讶</option><option value="calm">中性</option><option value="fluent">生动</option></select></label>
+
+          <details class="advanced-settings minimax-advanced">
+            <summary>语种、发音、输出与声音效果</summary>
+            <div class="advanced-settings-body">
+              <div class="step-control-grid step-control-grid-three">
+                <label class="control-field" for="minimaxLanguage"><span>语种增强</span><small>自动或指定语言识别</small><select id="minimaxLanguage"></select></label>
+                <label class="control-field" for="minimaxFormat"><span>音频格式</span><small>裸流格式仅供下载</small><select id="minimaxFormat"><option value="mp3">MP3</option><option value="wav">WAV</option><option value="flac">FLAC</option><option value="opus">Ogg / Opus</option><option value="pcm">PCM 裸流</option><option value="pcmu_wav">G.711 μ-law WAV</option><option value="pcmu_raw">G.711 μ-law 裸流</option></select></label>
+                <label class="control-field" for="minimaxSampleRate"><span>采样率</span><small>随格式自动筛选</small><select id="minimaxSampleRate"></select></label>
+              </div>
+
+              <div class="step-control-grid">
+                <label class="control-field" for="minimaxBitrate"><span>MP3 比特率</span><small>其他格式不发送此参数</small><select id="minimaxBitrate"><option value="32000">32 kbps</option><option value="64000">64 kbps</option><option value="128000" selected>128 kbps</option><option value="256000">256 kbps</option></select></label>
+                <label class="control-field" for="minimaxChannel"><span>声道</span><small>单声道或双声道</small><select id="minimaxChannel"><option value="1">单声道</option><option value="2" selected>双声道</option></select></label>
+              </div>
+
+              <label class="control-field" for="minimaxPronunciation"><span>发音词典</span><small>每行一条“原文/发音”，最多 50 条</small><textarea id="minimaxPronunciation" maxlength="6000" placeholder="草地/(cao3)(di1)&#10;MiniMax/mini max"></textarea></label>
+
+              <div class="minimax-toggle-row">
+                <label class="checkbox-label step-checkbox"><input id="minimaxEnglishNormalization" type="checkbox"><span><b>英语文本规范化</b><small>提升数字等英语场景读法</small></span></label>
+                <label class="checkbox-label step-checkbox"><input id="minimaxWatermark" type="checkbox"><span><b>AIGC 音频水印</b><small>在音频末尾加入节奏标识</small></span></label>
+              </div>
+
+              <fieldset class="minimax-modify-fieldset" id="minimaxModifyFieldset">
+                <legend>声音效果器</legend>
+                <div class="step-control-grid step-control-grid-three">
+                  <label class="control-field range-field" for="minimaxModifyPitch"><span>音高 <output id="minimaxModifyPitchValue">0</output></span><small>低沉到明亮</small><input id="minimaxModifyPitch" type="range" min="-100" max="100" step="1" value="0"></label>
+                  <label class="control-field range-field" for="minimaxModifyIntensity"><span>强度 <output id="minimaxModifyIntensityValue">0</output></span><small>力量到柔和</small><input id="minimaxModifyIntensity" type="range" min="-100" max="100" step="1" value="0"></label>
+                  <label class="control-field range-field" for="minimaxModifyTimbre"><span>音色 <output id="minimaxModifyTimbreValue">0</output></span><small>浑厚到清脆</small><input id="minimaxModifyTimbre" type="range" min="-100" max="100" step="1" value="0"></label>
+                </div>
+                <label class="control-field" for="minimaxSoundEffect"><span>场景音效</span><small>单次只能选择一种</small><select id="minimaxSoundEffect"><option value="">不使用</option><option value="spacious_echo">空旷回音</option><option value="auditorium_echo">礼堂广播</option><option value="lofi_telephone">电话失真</option><option value="robotic">电音</option></select></label>
+              </fieldset>
+            </div>
+          </details>
+
+          <button class="primary-button" id="minimaxButton" type="submit">
+            <span class="button-wave" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span id="minimaxLabel">创建异步语音任务</span>
+          </button>
+          <p class="form-message" id="minimaxMessage" role="status" aria-live="polite"></p>
+        </aside>
+      </form>
+
+      <section class="result-panel" id="minimaxResultPanel" hidden>
+        <div class="result-info"><span class="result-icon" aria-hidden="true">♪</span><div><h2>语音已生成</h2><p id="minimaxResultMeta"></p></div></div>
+        <audio id="minimaxAudioPlayer" controls preload="metadata"></audio>
+        <a class="outline-button" id="minimaxDownloadButton" href="#">下载音频</a>
+      </section>
+
+      <section class="history-section" aria-labelledby="minimaxHistoryTitle">
+        <div class="section-heading"><div><p class="eyebrow">SQLite 本地音频 · MiniMax</p><h2 id="minimaxHistoryTitle">MiniMax 生成历史</h2></div><button class="text-button danger" id="clearMinimaxHistory" type="button" hidden>清空记录</button></div>
+        <div id="minimaxHistoryList" class="history-list"></div>
+        <div class="empty-state" id="minimaxHistoryEmpty"><span>♪</span><p>MiniMax 生成的语音会单独保存在这里</p></div>
+      </section>
+    </section>
+
+    <section id="seedAudioView" class="app-view" hidden>
+      <div class="page-heading">
+        <div><p class="eyebrow">Volcengine Seed Audio</p><h1>参考声音、图片或描述生成音频</h1></div>
+        <span class="database-badge">最长 120 秒 · Base64 参考资源</span>
+      </div>
+
+      <form id="seedAudioForm" class="workspace step-workspace seed-audio-workspace">
+        <div class="editor-pane step-editor-pane seed-audio-editor-pane">
+          <label class="field-label" for="seedAudioText">文本与生成提示词</label>
+          <textarea id="seedAudioText" maxlength="3000" placeholder="输入待合成文本，也可以描述所需音效、音色、情绪和演绎方式。使用多条音频时可在提示词中引用 @音频1、@音频2……" required></textarea>
+          <div class="editor-footer"><span id="seedAudioPromptHint">无需参考资源，模型按文字描述生成</span><span id="seedAudioCharCount">0 / 3,000</span></div>
+        </div>
+
+        <aside class="settings-pane step-settings seed-audio-settings" aria-label="Seed Audio 设置">
+          <div class="settings-title"><h2>生成设置</h2><span id="seedAudioModelBadge">seed-audio-1.0-multilingual</span></div>
+
+          <section class="seed-generation-settings" aria-label="模型与生成方式">
+            <label class="control-field seed-model-control" for="seedAudioModel"><span>模型版本</span><small id="seedAudioModelDescription"></small><select id="seedAudioModel"><option value="seed-audio-1.0-multilingual">Seed Audio 1.0 多语种</option><option value="seed-audio-1.0">Seed Audio 1.0</option></select></label>
+            <fieldset class="seed-mode-fieldset">
+              <legend>生成方式</legend>
+              <div class="seed-mode-segment">
+                <label><input type="radio" name="seedReferenceMode" value="text" checked><span>纯文本</span></label>
+                <label><input type="radio" name="seedReferenceMode" value="audio"><span>参考音频</span></label>
+                <label><input type="radio" name="seedReferenceMode" value="image"><span>参考图片</span></label>
+              </div>
+            </fieldset>
+          </section>
+
+          <section id="seedAudioAudioPanel" class="seed-reference-panel" hidden>
+            <div class="seed-panel-heading"><div><b>音频参考</b><small>按顺序对应 @音频1 至 @音频3</small></div><button type="button" id="addSeedAudioReference">＋ 添加参考音频</button></div>
+            <div class="seed-reference-column-headings" aria-hidden="true"><span>参考</span><span>来源</span><span>使用场景</span><span>具体音色或输入</span></div>
+            <div id="seedAudioReferences" class="seed-reference-list"></div>
+          </section>
+
+          <section id="seedAudioImagePanel" class="seed-reference-panel" hidden>
+            <label class="upload-zone seed-image-upload" id="seedImageUploadZone" for="seedImageFile">
+              <input id="seedImageFile" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp">
+              <span class="upload-icon" aria-hidden="true">＋</span>
+              <strong>上传一张人物或场景图片</strong>
+              <small>JPEG、PNG、WebP，最大 10 MB，仅转为 Base64 发送</small>
+            </label>
+            <div class="file-preview" id="seedImagePreview" hidden><div><strong id="seedImageName"></strong><small id="seedImageMeta"></small></div><button type="button" id="removeSeedImage">移除</button></div>
+          </section>
+
+          <div class="step-control-grid step-control-grid-three seed-output-grid">
+            <label class="control-field" for="seedAudioFormat"><span>输出格式</span><small>浏览器支持常用封装</small><select id="seedAudioFormat"><option value="wav">WAV</option><option value="mp3">MP3</option><option value="ogg_opus">OGG / Opus</option><option value="pcm">PCM 裸流</option></select></label>
+            <label class="control-field" for="seedAudioSampleRate"><span>采样率</span><small>默认 24,000 Hz</small><select id="seedAudioSampleRate"><option value="8000">8,000 Hz</option><option value="16000">16,000 Hz</option><option value="24000" selected>24,000 Hz</option><option value="32000">32,000 Hz</option><option value="44100">44,100 Hz</option><option value="48000">48,000 Hz</option></select></label>
+            <div class="control-field checkbox-field"><span>字幕时间戳</span><small>返回句子和字级时间轴</small><label class="checkbox-label step-checkbox"><input id="seedAudioSubtitle" type="checkbox"><span><b>生成字幕</b></span></label></div>
+          </div>
+
+          <div class="step-control-grid step-control-grid-three">
+            <label class="control-field range-field" for="seedAudioSpeechRate"><span>语速 <output id="seedAudioSpeechRateValue">0</output></span><small>-50 至 100</small><input id="seedAudioSpeechRate" type="range" min="-50" max="100" step="1" value="0"></label>
+            <label class="control-field range-field" for="seedAudioLoudnessRate"><span>音量 <output id="seedAudioLoudnessRateValue">0</output></span><small>-50 至 100</small><input id="seedAudioLoudnessRate" type="range" min="-50" max="100" step="1" value="0"></label>
+            <label class="control-field range-field" for="seedAudioPitchRate"><span>音调 <output id="seedAudioPitchRateValue">0</output></span><small>-12 至 12</small><input id="seedAudioPitchRate" type="range" min="-12" max="12" step="1" value="0"></label>
+          </div>
+
+          <details class="advanced-settings seed-watermark-settings">
+            <summary>显式水印与 AIGC 元数据</summary>
+            <div class="advanced-settings-body">
+              <div class="minimax-toggle-row">
+                <label class="checkbox-label step-checkbox"><input id="seedAudioAigcWatermark" type="checkbox"><span><b>显式节奏水印</b><small>在音频结尾增加节奏标识</small></span></label>
+                <label class="checkbox-label step-checkbox"><input id="seedAudioMetadataEnabled" type="checkbox"><span><b>隐式元数据</b><small>写入音频 Header</small></span></label>
+              </div>
+              <fieldset id="seedAudioMetadataFields" class="minimax-modify-fieldset" disabled>
+                <legend>AIGC 元数据</legend>
+                <div class="step-control-grid">
+                  <label class="control-field" for="seedAudioContentProducer"><span>内容制作方</span><small>服务提供者名称或编码</small><input id="seedAudioContentProducer" type="text" maxlength="500"></label>
+                  <label class="control-field" for="seedAudioProduceId"><span>制作编号</span><small>内容制作追踪编号</small><input id="seedAudioProduceId" type="text" maxlength="500"></label>
+                  <label class="control-field" for="seedAudioContentPropagator"><span>内容传播方</span><small>传播服务提供者名称或编码</small><input id="seedAudioContentPropagator" type="text" maxlength="500"></label>
+                  <label class="control-field" for="seedAudioPropagateId"><span>传播编号</span><small>内容传播追踪编号</small><input id="seedAudioPropagateId" type="text" maxlength="500"></label>
+                </div>
+              </fieldset>
+            </div>
+          </details>
+
+          <button class="primary-button" id="seedAudioButton" type="submit"><span class="button-wave" aria-hidden="true"><i></i><i></i><i></i></span><span id="seedAudioLabel">生成 Seed Audio</span></button>
+          <p class="form-message" id="seedAudioMessage" role="status" aria-live="polite"></p>
+        </aside>
+      </form>
+
+      <section class="result-panel seed-audio-result" id="seedAudioResultPanel" hidden>
+        <div class="result-info"><span class="result-icon" aria-hidden="true">♪</span><div><h2>音频已生成</h2><p id="seedAudioResultMeta"></p></div></div>
+        <audio id="seedAudioPlayer" controls preload="metadata"></audio>
+        <div class="seed-result-actions"><a class="outline-button" id="seedAudioDownloadButton" href="#">下载音频</a><button class="outline-button" id="seedAudioSubtitleButton" type="button" hidden>下载字幕</button></div>
+      </section>
+
+      <section class="history-section" aria-labelledby="seedAudioHistoryTitle">
+        <div class="section-heading"><div><p class="eyebrow">SQLite 本地音频 · Seed Audio</p><h2 id="seedAudioHistoryTitle">Seed Audio 生成历史</h2></div><button class="text-button danger" id="clearSeedAudioHistory" type="button" hidden>清空记录</button></div>
+        <div id="seedAudioHistoryList" class="history-list"></div>
+        <div class="empty-state" id="seedAudioHistoryEmpty"><span>♪</span><p>Seed Audio 生成的音频会单独保存在这里</p></div>
+      </section>
+    </section>
+
+    <section id="voicesView" class="app-view" hidden>
+      <div class="page-heading">
+        <div><p class="eyebrow">Qwen3-TTS 音色管理</p><h1>创建并保存音色</h1></div>
+        <span class="database-badge">SQLite 音色库</span>
+      </div>
+
+      <div class="voice-studio">
+        <div class="voice-creation">
+          <div class="creation-switch" role="tablist" aria-label="音色创建方式">
+            <button class="active" type="button" role="tab" aria-selected="true" data-builder="design">设计 VD</button>
+            <button type="button" role="tab" aria-selected="false" data-builder="clone">复刻 VC</button>
+          </div>
+          <form id="designForm" class="design-form">
+          <div class="form-heading"><h2>新建音色</h2><p>先设计并保存，再到语音生成中使用。</p></div>
+          <label class="field-label" for="voiceName">音色名称</label>
+          <input id="voiceName" maxlength="40" placeholder="例如：温柔旁白" required>
+
+          <fieldset>
+            <legend>声音底色</legend>
+            <div class="preset-grid" id="voicePresets"></div>
+          </fieldset>
+
+          <fieldset>
+            <legend>表达示例</legend>
+            <div class="style-chips" id="expressionPresets"></div>
+          </fieldset>
+
+          <div id="customExpressionField" hidden>
+            <label class="field-label" for="customExpression">自定义表达</label>
+            <textarea id="customExpression" maxlength="1000" placeholder="例如：克制地表达喜悦，语速先慢后快，结尾带一点笑意。"></textarea>
+          </div>
+
+          <label class="field-label" for="voicePrompt">完整声音描述</label>
+          <textarea id="voicePrompt" maxlength="2048" required></textarea>
+
+          <label class="field-label" for="previewText">试听文本</label>
+          <textarea id="previewText" maxlength="300">大家好，很高兴用这个新声音与你见面。接下来，让我们一起听听它的表现。</textarea>
+
+          <button class="primary-button" id="designButton" type="submit"><span id="designLabel">设计并保存音色</span></button>
+          <p class="form-message" id="designMessage" role="alert" aria-live="polite"></p>
+          </form>
+
+          <form id="cloneForm" class="design-form" hidden>
+            <div class="form-heading"><h2>复刻参考音色</h2><p>上传一次并保存，之后可在语音生成中重复使用。</p></div>
+            <label class="field-label" for="cloneVoiceName">音色名称</label>
+            <input id="cloneVoiceName" maxlength="40" placeholder="例如：我的旁白" required>
+
+            <label class="field-label" for="cloneAudioFile">参考音频</label>
+            <label class="upload-zone" id="cloneUploadZone" for="cloneAudioFile">
+              <input id="cloneAudioFile" type="file" accept="audio/wav,audio/x-wav,audio/mpeg,audio/mp4,audio/m4a,.wav,.mp3,.m4a">
+              <span class="upload-icon" aria-hidden="true">＋</span>
+              <strong>上传参考人声</strong>
+              <small>WAV、MP3、M4A，推荐 10–20 秒，最大 10 MB</small>
+            </label>
+            <div class="file-preview" id="cloneFilePreview" hidden>
+              <div><strong id="cloneFileName"></strong><small id="cloneFileMeta"></small></div>
+              <button type="button" id="removeCloneFile">移除</button>
+            </div>
+            <p class="compact-tip">建议使用单人清晰朗读，避免音乐、噪音或明显混响。复刻完成后会保存为 VC 音色。</p>
+            <button class="primary-button" id="cloneButton" type="submit"><span id="cloneLabel">复刻并保存音色</span></button>
+            <p class="form-message" id="cloneMessage" role="alert" aria-live="polite"></p>
+          </form>
+        </div>
+
+        <section class="voice-library" aria-labelledby="libraryTitle">
+          <div class="library-heading"><div><p class="eyebrow">管理官方系统音色、VD 设计音色与 VC 复刻音色</p><h2 id="libraryTitle">音色库</h2></div><span id="libraryCount">0 个音色</span></div>
+          <div id="voiceList" class="voice-list"></div>
+          <div class="empty-state" id="voiceEmpty"><span>声</span><p>设计或复刻成功的音色会永久保存在这里</p></div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <footer><span>Qwen、StepAudio 与 MiniMax 独立使用</span><span>音色、任务与历史保存在 data/qwen-tts.db</span></footer>
+  <script src="/minimax-ui.js?v=20260721-4" defer></script>
+  <script src="/seed-audio-ui.js?v=20260721-1" defer></script>
+  <script src="/seed-audio-page.js?v=20260721-1" defer></script>
+  <script src="/app.js?v=20260721-4" defer></script>
+</body>
+</html>
